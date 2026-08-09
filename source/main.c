@@ -233,7 +233,7 @@ static C2D_TextBuf s_textBuf;
 static void drawExpressionOverlay(C3D_RenderTarget* target)
 {
 	char label[64];
-	snprintf(label, sizeof(label), "Expression: %s   (SELECT: replace last Mii)",
+	snprintf(label, sizeof(label), "Expression: %s\n(SELECT: replace last Mii)",
 		CFL_GetExpressionName(currentExpression));
 
 	C2D_Prepare();
@@ -242,7 +242,7 @@ static void drawExpressionOverlay(C3D_RenderTarget* target)
 	C2D_Text text;
 	C2D_TextParse(&text, s_textBuf, label);
 	C2D_TextOptimize(&text);
-	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.7f, 0.7f, C2D_Color32(255, 255, 255, 255));
+	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.5f, 0.5f, C2D_Color32(255, 255, 255, 255));
 }
 
 static void drawTextMenu(C3D_RenderTarget* target, const char* heading, const char* const* options, int count, int selection, const char* footer)
@@ -520,7 +520,6 @@ int main(void)
 					CFL_DestroyCharModel(&models[slot]);
 					if (CFL_InitCharModel(&models[slot], &mii, activeResolution, activeExpressionFlags)) {
 						CFL_SetExpression(&models[slot], currentExpression);
-						modelSpin[slot] = 0.0f;
 					} else {
 						dbglog_err("\nCould not rebuild CharModel %d after reselect.\n", slot);
 					}
