@@ -7,7 +7,6 @@
 #include <math.h>
 
 #include "cfl_mii.h"
-#include "dbglog.h"
 
 #define CLEAR_COLOR 0x404040FF
 
@@ -19,10 +18,6 @@
 typedef struct { float position[3]; float normal[3]; float texcoord[2]; } Vertex;
 
 static C3D_Mtx projection;
-
-static C3D_LightEnv sceneLightEnv;
-static C3D_Light sceneLight;
-static C3D_LightLut sceneSpecularLut;
 
 static float scale = 0.032f;
 static float yaw = 0.0f;
@@ -118,22 +113,6 @@ static CFLExpression nextTestExpression(CFLExpression from)
 	return from;
 }
 
-static void setMaterialColor(const float color[3], bool noSpecular)
-{
-	static const float kShadowColor[3] = { 0.10196f, 0.09020f, 0.07843f };
-
-	C3D_Material mtl;
-	for (int i = 0; i < 3; i++) {
-		float c = color[2 - i];
-		mtl.ambient[i] = c * (1.0f - kShadowColor[i]);
-		mtl.diffuse[i] = c * kShadowColor[i];
-	}
-	float spec = noSpecular ? 0.0f : 0.42f;
-	mtl.specular0[0] = mtl.specular0[1] = mtl.specular0[2] = spec;
-	mtl.specular1[0] = mtl.specular1[1] = mtl.specular1[2] = 0.0f;
-	mtl.emission[0] = mtl.emission[1] = mtl.emission[2] = 0.0f;
-	C3D_LightEnvMaterial(&sceneLightEnv, &mtl);
-}
 
 static void getSlotOffset(int index, int count, float* outX, float* outY)
 {
@@ -158,7 +137,7 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.projection, &projection);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.modelView,  &modelView);
 
-	C3D_LightEnvBind(&sceneLightEnv);
+	CFL_BindDefaultShader();
 
 	{
 		C3D_TexEnv* env1 = C3D_GetTexEnv(1);
@@ -188,7 +167,7 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 			BufInfo_Init(bufInfo);
 			BufInfo_Add(bufInfo, part->vbo, sizeof(Vertex), 3, 0x210);
 
-			setMaterialColor(part->color, part->noSpecular);
+			CFL_SetDefaultMaterial(part->color, part->noSpecular);
 
 			C3D_TexEnv* env = C3D_GetTexEnv(0);
 			if (part->hasTexture) {
@@ -390,7 +369,7 @@ static void drawIconTest(C3D_RenderTarget* target)
 
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.projection, &projection);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.modelView,  &modelView);
-	C3D_LightEnvBind(&sceneLightEnv);
+	CFL_BindDefaultShader();
 
 	{
 		C3D_TexEnv* env1 = C3D_GetTexEnv(1);
@@ -402,7 +381,7 @@ static void drawIconTest(C3D_RenderTarget* target)
 	}
 
 	static const float white[3] = { 1.0f, 1.0f, 1.0f };
-	setMaterialColor(white, true);
+	CFL_SetDefaultMaterial(white, true);
 
 	C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_ALL);
 	C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA);
@@ -440,7 +419,7 @@ int main(void)
 	gfxInitDefault();
 	consoleInit(GFX_BOTTOM, NULL);
 
-	dbglog_open();
+	CFL_EnableSDDebug(true);
 	dbglog("CFL Tool\n\n");
 	dbglog("Log file: sdmc:/3ds/cfl_test.txt\n\n");
 
@@ -454,26 +433,12 @@ int main(void)
 		dbglog("launcher).\n");
 		C3D_Fini();
 		waitForStartAndExit();
-		dbglog_close();
+		CFL_EnableSDDebug(false);
 		gfxExit();
 		return 0;
 	}
 	Mtx_PerspTilt(&projection, C3D_AngleFromDegrees(50.0f), C3D_AspectRatioTop, 0.01f, 1000.0f, false);
 
-	C3D_LightEnvInit(&sceneLightEnv);
-	C3D_LightEnvAmbient(&sceneLightEnv, 0.0f, 0.0f, 0.0f);
-	LightLut_Phong(&sceneSpecularLut, 8.0f);
-	C3D_LightEnvLut(&sceneLightEnv, GPU_LUT_D0, GPU_LUTINPUT_NH, false, &sceneSpecularLut);
-	C3D_LightInit(&sceneLight, &sceneLightEnv);
-	{
-		C3D_FVec lightDir = FVec4_New(-0.53906f, 0.53906f, 0.64697f, 0.0f);
-		C3D_LightPosition(&sceneLight, &lightDir);
-	}
-	C3D_LightAmbient(&sceneLight, 1.0f, 1.0f, 1.0f);
-	C3D_LightDiffuse(&sceneLight, 1.0f, 1.0f, 1.0f);
-	C3D_LightSpecular0(&sceneLight, 0.99608f, 0.99608f, 0.99608f);
-	C3D_LightSpecular1(&sceneLight, 0.0f, 0.0f, 0.0f);
-	C3D_LightEnable(&sceneLight, true);
 
 	C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
 	s_textBuf = C2D_TextBufNew(256);
@@ -612,7 +577,7 @@ int main(void)
 	C2D_TextBufDelete(s_textBuf);
 	C2D_Fini();
 	C3D_Fini();
-	dbglog_close();
+	CFL_EnableSDDebug(false);
 	gfxExit();
 	return 0;
 }
