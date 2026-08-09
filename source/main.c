@@ -326,7 +326,8 @@ static void startIconTest(void)
 		screen = SCREEN_TITLE;
 		return;
 	}
-	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, NULL, &iconTexture256)) {
+	CFLIconSetting transparentSetting = { CFL_ICON_BG_DIRECT, { 0.0f, 0.0f, 0.0f, 0.0f }, NULL, NULL };
+	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, &transparentSetting, &iconTexture256)) {
 		dbglog_err("\nIcon Test: CFL_CommandMakeModelIcon (256) failed.\n");
 		CFL_DestroyCharModel(&iconModel);
 		screen = SCREEN_TITLE;
