@@ -273,11 +273,11 @@ static void startCharModelTest(const CharModelTestConfig* cfg)
 	for (int i = 0; i < cfg->modelCount && i < MAX_TEST_MODELS; i++) {
 		MiiData mii;
 		selectMii(&mii);
-		dbglog_vram_stats("startCharModelTest before CFL_InitCharModel", false);
+		dbglogVramStats("startCharModelTest before CFL_InitCharModel", false);
 		modelCount = i + 1;
 		if (!CFL_InitCharModel(&models[i], &mii, cfg->resolution, cfg->expressionFlags)) {
-			dbglog_err("\nCould not build CharModel %d/%d for this test.\n", i + 1, cfg->modelCount);
-			dbglog_vram_stats("startCharModelTest CFL_InitCharModel failure", true);
+			dbglogErr("\nCould not build CharModel %d/%d for this test.\n", i + 1, cfg->modelCount);
+			dbglogVramStats("startCharModelTest CFL_InitCharModel failure", true);
 			continue;
 		}
 		CFL_SetExpression(&models[i], currentExpression);
@@ -301,20 +301,20 @@ static void startIconTest(void)
 	MiiData mii;
 	selectMii(&mii);
 	if (!CFL_InitCharModel(&iconModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
-		dbglog_err("\nIcon Test: could not build a CharModel from this Mii.\n");
+		dbglogErr("\nIcon Test: could not build a CharModel from this Mii.\n");
 		screen = SCREEN_TITLE;
 		return;
 	}
 	CFLIconSetting transparentSetting = { CFL_ICON_BG_DIRECT, { 0.0f, 0.0f, 0.0f, 0.0f }, NULL, NULL };
 	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, &transparentSetting, &iconTexture256)) {
-		dbglog_err("\nIcon Test: CFL_CommandMakeModelIcon (256) failed.\n");
+		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (256) failed.\n");
 		CFL_DestroyCharModel(&iconModel);
 		screen = SCREEN_TITLE;
 		return;
 	}
 	iconTexture256Valid = true;
 	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 128, NULL, &iconTexture128)) {
-		dbglog_err("\nIcon Test: CFL_CommandMakeModelIcon (128) failed.\n");
+		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (128) failed.\n");
 		C3D_TexDelete(&iconTexture256);
 		iconTexture256Valid = false;
 		CFL_DestroyCharModel(&iconModel);
@@ -427,7 +427,7 @@ int main(void)
 	C3D_RenderTarget* target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	if (!CFL_Initialize()) {
-		dbglog_err("\nCFL_Initialize failed - see the log above for specifics\n");
+		dbglogErr("\nCFL_Initialize failed - see the log above for specifics\n");
 		dbglog("(most likely the archive read needing full ARM11 FS\n");
 		dbglog("permissions - launch via Luma3DS/Rosalina's homebrew\n");
 		dbglog("launcher).\n");
@@ -487,7 +487,7 @@ int main(void)
 					if (CFL_InitCharModel(&models[slot], &mii, activeResolution, activeExpressionFlags)) {
 						CFL_SetExpression(&models[slot], currentExpression);
 					} else {
-						dbglog_err("\nCould not rebuild CharModel %d after reselect.\n", slot);
+						dbglogErr("\nCould not rebuild CharModel %d after reselect.\n", slot);
 					}
 				}
 			}
