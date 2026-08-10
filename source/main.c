@@ -38,13 +38,15 @@ typedef enum {
 	SCREEN_CHARMODEL_SUBMENU,
 	SCREEN_CHARMODEL_TEST,
 	SCREEN_ICON_TEST,
+	SCREEN_DATA_TEST,
 } AppScreen;
 static AppScreen screen = SCREEN_TITLE;
 
-#define TITLE_OPTION_COUNT 2
+#define TITLE_OPTION_COUNT 3
 static const char* kTitleOptions[TITLE_OPTION_COUNT] = {
 	"CharModel only Test",
 	"Icon Test",
+	"CharModel from Data",
 };
 static int titleSelection = 0;
 
@@ -75,6 +77,16 @@ static C3D_Tex iconTexture256;
 static C3D_Tex iconTexture128;
 static bool iconTexture256Valid = false;
 static bool iconTexture128Valid = false;
+
+static const char* kSampleBase64StoreData =
+	"AwBgMIJUICvpzY4vnWYVrXy7ikd01AAAWR1KAGEAcwBtAGkAbgBlAAAAAAAAABw3EhB7ASFuQxwNZMcYAAgegg0AMEGzW4JtAAAAAAAAAAAAAAAAAAAAAAAAAAAAAML0";
+
+static CFLCharModel dataTestModel;
+static bool dataTestModelValid = false;
+static float dataTestSpin = 0.0f;
+static char dataTestBase64Display[200];
+static char dataTestMiiName[32];
+static u32 dataTestMiiId;
 
 #define MII_SELECTOR_PAGE_SIZE 10
 static u32 s_lastMiiSelectorIndex = 0;
@@ -110,6 +122,98 @@ static bool selectMii(MiiData* mii)
 	}
 	dbglog("No Mii selected, using defaults.\n");
 	return false;
+}
+
+static int base64DecodeChar(char c)
+{
+	if (c >= 'A' && c <= 'Z') return c - 'A';
+	if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+	if (c >= '0' && c <= '9') return c - '0' + 52;
+	if (c == '+') return 62;
+	if (c == '/') return 63;
+	return -1;
+}
+
+static size_t base64Decode(const char* in, u8* out, size_t outCapacity)
+{
+	size_t outLen = 0;
+	u32 buffer = 0;
+	int bitsCollected = 0;
+	for (const char* p = in; *p; p++) {
+		char c = *p;
+		if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
+		int val = base64DecodeChar(c);
+		if (val < 0) return 0;
+		buffer = (buffer << 6) | (u32)val;
+		bitsCollected += 6;
+		if (bitsCollected >= 8) {
+			bitsCollected -= 8;
+			if (outLen >= outCapacity) return 0;
+			out[outLen++] = (u8)((buffer >> bitsCollected) & 0xFF);
+		}
+	}
+	return outLen;
+}
+
+static bool miiFromBase64StoreData(const char* base64, MiiData* outMii)
+{
+	u8 raw[sizeof(CFLStoreData)];
+	size_t n = base64Decode(base64, raw, sizeof(raw));
+	if (n != sizeof(CFLStoreData)) {
+		dbglogErr("miiFromBase64StoreData: decoded %u bytes, expected %u\n",
+			(unsigned)n, (unsigned)sizeof(CFLStoreData));
+		return false;
+	}
+	const CFLStoreData* store = (const CFLStoreData*)raw;
+	if (!CFL_IsStoreDataValid(store)) {
+		dbglogErr("miiFromBase64StoreData: checksum invalid\n");
+		return false;
+	}
+	*outMii = store->miiData;
+	return true;
+}
+
+static void base64Encode(const u8* data, size_t len, char* out, size_t outCapacity)
+{
+	static const char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	size_t o = 0;
+	size_t i = 0;
+	for (; i + 3 <= len && o + 4 < outCapacity; i += 3) {
+		u32 n = ((u32)data[i] << 16) | ((u32)data[i + 1] << 8) | data[i + 2];
+		out[o++] = kAlphabet[(n >> 18) & 0x3F];
+		out[o++] = kAlphabet[(n >> 12) & 0x3F];
+		out[o++] = kAlphabet[(n >> 6) & 0x3F];
+		out[o++] = kAlphabet[n & 0x3F];
+	}
+	size_t rem = len - i;
+	if (rem == 1 && o + 4 < outCapacity) {
+		u32 n = (u32)data[i] << 16;
+		out[o++] = kAlphabet[(n >> 18) & 0x3F];
+		out[o++] = kAlphabet[(n >> 12) & 0x3F];
+		out[o++] = '=';
+		out[o++] = '=';
+	} else if (rem == 2 && o + 4 < outCapacity) {
+		u32 n = ((u32)data[i] << 16) | ((u32)data[i + 1] << 8);
+		out[o++] = kAlphabet[(n >> 18) & 0x3F];
+		out[o++] = kAlphabet[(n >> 12) & 0x3F];
+		out[o++] = kAlphabet[(n >> 6) & 0x3F];
+		out[o++] = '=';
+	}
+	out[o] = '\0';
+}
+
+static void wrapTextForDisplay(const char* in, char* out, size_t outCapacity, int wrapWidth)
+{
+	size_t o = 0;
+	int col = 0;
+	for (const char* p = in; *p && o + 2 < outCapacity; p++) {
+		out[o++] = *p;
+		if (++col >= wrapWidth) {
+			out[o++] = '\n';
+			col = 0;
+		}
+	}
+	out[o] = '\0';
 }
 
 static CFLExpression nextTestExpression(CFLExpression from)
@@ -300,6 +404,86 @@ static void startCharModelTest(const CharModelTestConfig* cfg)
 	screen = SCREEN_CHARMODEL_TEST;
 }
 
+static void utf16ToUtf8(const u16* utf16, int maxChars, char* out, size_t outCapacity)
+{
+	size_t o = 0;
+	for (int i = 0; i < maxChars && utf16[i] != 0 && o + 3 < outCapacity; i++) {
+		u32 cp = utf16[i];
+		if (cp < 0x80) {
+			out[o++] = (char)cp;
+		} else if (cp < 0x800) {
+			out[o++] = (char)(0xC0 | (cp >> 6));
+			out[o++] = (char)(0x80 | (cp & 0x3F));
+		} else {
+			out[o++] = (char)(0xE0 | (cp >> 12));
+			out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+			out[o++] = (char)(0x80 | (cp & 0x3F));
+		}
+	}
+	out[o] = '\0';
+}
+
+static void updateDataTestDisplay(const MiiData* mii)
+{
+	u16 nameBuf[10];
+	memcpy(nameBuf, mii->mii_name, sizeof(nameBuf));
+	utf16ToUtf8(nameBuf, 10, dataTestMiiName, sizeof(dataTestMiiName));
+	dataTestMiiId = mii->mii_id;
+
+	CFLStoreData store;
+	if (CFL_MakeStoreData(mii, &store)) {
+		char raw[200];
+		base64Encode((const u8*)&store, sizeof(store), raw, sizeof(raw));
+		wrapTextForDisplay(raw, dataTestBase64Display, sizeof(dataTestBase64Display), 32);
+	} else {
+		snprintf(dataTestBase64Display, sizeof(dataTestBase64Display), "(failed to encode)");
+	}
+}
+
+static void startDataTest(void)
+{
+	CFL_DestroyCharModel(&dataTestModel);
+	dataTestModelValid = false;
+
+	MiiData mii;
+	if (!miiFromBase64StoreData(kSampleBase64StoreData, &mii)) {
+		dbglogErr("\nCharModel from Data: could not decode the sample base64 StoreData.\n");
+		screen = SCREEN_TITLE;
+		return;
+	}
+	if (!CFL_InitCharModel(&dataTestModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
+		dbglogErr("\nCharModel from Data: could not build a CharModel from the decoded Mii.\n");
+		screen = SCREEN_TITLE;
+		return;
+	}
+	dataTestModelValid = true;
+	dataTestSpin = 0.0f;
+	updateDataTestDisplay(&mii);
+
+	cameraDist = 3.2f;
+	yaw = 0.0f; pitch = 0.0f; headX = 0.0f; headY = 0.0f;
+	screen = SCREEN_DATA_TEST;
+}
+
+static void drawDataTest(C3D_RenderTarget* target)
+{
+	CFL_RebindShader();
+	if (dataTestModelValid)
+		sceneRenderModel(&dataTestModel, 0.0f, 0.0f, dataTestSpin);
+
+	char label[350];
+	snprintf(label, sizeof(label), "CharModel from Data   (SELECT: pick a Mii   B: back)\nName: %s   ID: %08lX\n%s",
+		dataTestMiiName, (unsigned long)dataTestMiiId, dataTestBase64Display);
+
+	C2D_Prepare();
+	C2D_SceneBegin(target);
+	C2D_TextBufClear(s_textBuf);
+	C2D_Text text;
+	C2D_TextParse(&text, s_textBuf, label);
+	C2D_TextOptimize(&text);
+	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.45f, 0.45f, C2D_Color32(255, 255, 255, 255));
+}
+
 static void startIconTest(void)
 {
 	CFL_DestroyCharModel(&iconModel);
@@ -468,8 +652,10 @@ int main(void)
 				if (titleSelection == 0) {
 					submenuSelection = 0;
 					screen = SCREEN_CHARMODEL_SUBMENU;
-				} else {
+				} else if (titleSelection == 1) {
 					startIconTest();
+				} else {
+					startDataTest();
 				}
 			}
 			break;
@@ -544,6 +730,29 @@ int main(void)
 				screen = SCREEN_TITLE;
 			}
 			break;
+
+		case SCREEN_DATA_TEST:
+			if (kDown & KEY_B) {
+				CFL_DestroyCharModel(&dataTestModel);
+				dataTestModelValid = false;
+				screen = SCREEN_TITLE;
+				break;
+			}
+			if (kDown & KEY_SELECT) {
+				MiiData mii;
+				if (selectMii(&mii)) {
+					CFL_DestroyCharModel(&dataTestModel);
+					if (CFL_InitCharModel(&dataTestModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
+						dataTestModelValid = true;
+						updateDataTestDisplay(&mii);
+					} else {
+						dataTestModelValid = false;
+						dbglogErr("\nCharModel from Data: could not build a CharModel from the selected Mii.\n");
+					}
+				}
+			}
+			dataTestSpin += 0.015f;
+			break;
 		}
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -568,6 +777,9 @@ int main(void)
 			case SCREEN_ICON_TEST:
 				drawIconTest(target);
 				break;
+			case SCREEN_DATA_TEST:
+				drawDataTest(target);
+				break;
 			}
 		C3D_FrameEnd(0);
 	}
@@ -576,6 +788,7 @@ int main(void)
 	CFL_DestroyCharModel(&iconModel);
 	if (iconTexture256Valid) C3D_TexDelete(&iconTexture256);
 	if (iconTexture128Valid) C3D_TexDelete(&iconTexture128);
+	CFL_DestroyCharModel(&dataTestModel);
 	for (int i = 0; i < ICON_QUAD_SLOTS; i++) {
 		if (s_iconQuadVBO[i]) linearFree(s_iconQuadVBO[i]);
 		if (s_iconQuadIBO[i]) linearFree(s_iconQuadIBO[i]);
