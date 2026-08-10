@@ -304,10 +304,26 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 				C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
 			}
 
+			if (part->capBlend) {
+				C3D_TexEnv* env2 = C3D_GetTexEnv(2);
+				C3D_TexEnvInit(env2);
+				C3D_TexEnvSrc(env2, C3D_RGB, GPU_PREVIOUS, GPU_FRAGMENT_PRIMARY_COLOR, 0);
+				C3D_TexEnvFunc(env2, C3D_RGB, GPU_ADD);
+				C3D_TexEnvSrc(env2, C3D_Alpha, GPU_PREVIOUS, 0, 0);
+				C3D_TexEnvFunc(env2, C3D_Alpha, GPU_REPLACE);
+				C3D_DirtyTexEnv(env2);
+			}
+
 			if (part->useIndices)
 				C3D_DrawElements(GPU_TRIANGLES, part->indexCount, C3D_UNSIGNED_BYTE, part->ibo);
 			else
 				C3D_DrawArrays(GPU_TRIANGLES, 0, part->vertexCount);
+
+			if (part->capBlend) {
+				C3D_TexEnv* env2 = C3D_GetTexEnv(2);
+				C3D_TexEnvInit(env2);
+				C3D_DirtyTexEnv(env2);
+			}
 		}
 	}
 }
@@ -801,6 +817,32 @@ int main(void)
 						dbglogErr("\nCharModel from Data: could not build a CharModel from the selected Mii.\n");
 				}
 			}
+
+			if (hidKeysHeld() & KEY_L) cameraDist *= 1.02f;
+			if (hidKeysHeld() & KEY_R) cameraDist *= 0.98f;
+			if (cameraDist < 0.3f) cameraDist = 0.3f;
+			if (cameraDist > 40.0f) cameraDist = 40.0f;
+
+			if (hidKeysHeld() & KEY_DLEFT)  headX -= 0.08f;
+			if (hidKeysHeld() & KEY_DRIGHT) headX += 0.08f;
+			if (hidKeysHeld() & KEY_DUP)    headY += 0.08f;
+			if (hidKeysHeld() & KEY_DDOWN)  headY -= 0.08f;
+
+			{
+				circlePosition cpos;
+				hidCircleRead(&cpos);
+				float cx = cpos.dx / 156.0f;
+				float cy = cpos.dy / 156.0f;
+				if (fabsf(cx) < 0.15f) cx = 0.0f;
+				if (fabsf(cy) < 0.15f) cy = 0.0f;
+				if (cx != 0.0f || cy != 0.0f) {
+					yaw += cx * 0.05f;
+					pitch += cy * 0.05f;
+					if (pitch > 1.3f) pitch = 1.3f;
+					if (pitch < -1.3f) pitch = -1.3f;
+				}
+			}
+
 			dataTestSpin += 0.015f;
 			break;
 		}
