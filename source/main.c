@@ -76,7 +76,9 @@ static C3D_Tex iconTexture128;
 static bool iconTexture256Valid = false;
 static bool iconTexture128Valid = false;
 
+#define MII_SELECTOR_PAGE_SIZE 10
 static u32 s_lastMiiSelectorIndex = 0;
+static bool s_lastMiiWasGuest = false;
 
 static bool selectMii(MiiData* mii)
 {
@@ -86,12 +88,18 @@ static bool selectMii(MiiData* mii)
 	MiiSelectorReturn ret;
 	miiSelectorInit(&conf);
 	miiSelectorSetTitle(&conf, "Select a Mii for the demo");
-	miiSelectorSetOptions(&conf, MIISELECTOR_CANCEL);
+	miiSelectorSetOptions(&conf, MIISELECTOR_CANCEL | MIISELECTOR_GUESTS);
 	miiSelectorSetInitialIndex(&conf, s_lastMiiSelectorIndex);
+	conf.show_guest_page = s_lastMiiWasGuest ? 1 : 0;
 	miiSelectorLaunch(&conf, &ret);
 
-	if (ret.guest_mii_was_selected && ret.guest_mii_index != 0xFFFFFFFF)
+	if (ret.guest_mii_was_selected && ret.guest_mii_index != 0xFFFFFFFF) {
 		s_lastMiiSelectorIndex = ret.guest_mii_index;
+		s_lastMiiWasGuest = true;
+	} else if (!ret.no_mii_selected) {
+		s_lastMiiSelectorIndex = ret.mii.mii_pos.page_index * MII_SELECTOR_PAGE_SIZE + ret.mii.mii_pos.slot_index;
+		s_lastMiiWasGuest = false;
+	}
 
 	if (!ret.no_mii_selected && miiSelectorChecksumIsValid(&ret)) {
 		*mii = ret.mii;
