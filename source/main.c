@@ -88,7 +88,6 @@ static char dataTestBase64Display[200];
 static char dataTestMiiName[32];
 static u32 dataTestMiiId;
 
-#define MII_SELECTOR_PAGE_SIZE 10
 static u32 s_lastMiiSelectorIndex = 0;
 static bool s_lastMiiWasGuest = false;
 
@@ -109,8 +108,13 @@ static bool selectMii(MiiData* mii)
 		s_lastMiiSelectorIndex = ret.guest_mii_index;
 		s_lastMiiWasGuest = true;
 	} else if (!ret.no_mii_selected) {
-		s_lastMiiSelectorIndex = ret.mii.mii_pos.page_index * MII_SELECTOR_PAGE_SIZE + ret.mii.mii_pos.slot_index;
-		s_lastMiiWasGuest = false;
+		u16 realIndex = 0;
+		if (CFL_SearchOfficialData(&ret.mii, &realIndex)) {
+			s_lastMiiSelectorIndex = realIndex;
+			s_lastMiiWasGuest = false;
+		} else {
+			dbglogErr("selectMii: CFL_SearchOfficialData could not find this Mii's real database index\n");
+		}
 	}
 
 	if (!ret.no_mii_selected && miiSelectorChecksumIsValid(&ret)) {
@@ -367,7 +371,7 @@ static void drawTextMenu(C3D_RenderTarget* target, const char* heading, const ch
 
 static void destroyTestModels(void)
 {
-	for (int i = 0; i < modelCount; i++) CFL_DestroyCharModel(&models[i]);
+	for (int i = 0; i < modelCount; i++) CFL_DeleteModel(&models[i]);
 	modelCount = 0;
 }
 
@@ -404,6 +408,46 @@ static void startCharModelTest(const CharModelTestConfig* cfg)
 	screen = SCREEN_CHARMODEL_TEST;
 }
 
+static void sanitizeMiiName16(u16* name, int maxChars)
+{
+	for (int i = 0; i < maxChars; i++) {
+		if (name[i] == 0) break;
+		if (name[i] < 0x20 || name[i] == 0x7f) name[i] = u'?';
+	}
+}
+
+static bool miiCharsetMatchesConsoleRegion(u8 charSet, u8 region)
+{
+	switch (charSet) {
+		case 0: return region == CFG_REGION_JPN || region == CFG_REGION_USA ||
+		               region == CFG_REGION_EUR || region == CFG_REGION_AUS;
+		case 1: return region == CFG_REGION_CHN;
+		case 2: return region == CFG_REGION_KOR;
+		case 3: return region == CFG_REGION_TWN;
+		default: return false;
+	}
+}
+
+static void getSafeMiiName16(const MiiData* mii, u16 outName[11])
+{
+	if (mii->mii_options.is_private_name) {
+		outName[0] = u'?'; outName[1] = u'?'; outName[2] = u'?'; outName[3] = 0;
+		return;
+	}
+
+	memcpy(outName, mii->mii_name, sizeof(mii->mii_name));
+	outName[10] = 0;
+	sanitizeMiiName16(outName, 10);
+
+	u8 region;
+	if (R_SUCCEEDED(CFGU_SecureInfoGetRegion(&region)) &&
+		!miiCharsetMatchesConsoleRegion(mii->mii_options.char_set, region)) {
+		for (int i = 0; i < 10; i++) {
+			if (outName[i] >= 0x80) outName[i] = u'?';
+		}
+	}
+}
+
 static void utf16ToUtf8(const u16* utf16, int maxChars, char* out, size_t outCapacity)
 {
 	size_t o = 0;
@@ -425,8 +469,8 @@ static void utf16ToUtf8(const u16* utf16, int maxChars, char* out, size_t outCap
 
 static void updateDataTestDisplay(const MiiData* mii)
 {
-	u16 nameBuf[10];
-	memcpy(nameBuf, mii->mii_name, sizeof(nameBuf));
+	u16 nameBuf[11];
+	getSafeMiiName16(mii, nameBuf);
 	utf16ToUtf8(nameBuf, 10, dataTestMiiName, sizeof(dataTestMiiName));
 	dataTestMiiId = mii->mii_id;
 
@@ -440,9 +484,21 @@ static void updateDataTestDisplay(const MiiData* mii)
 	}
 }
 
+static bool rebuildDataTestModel(const MiiData* mii)
+{
+	CFL_DeleteModel(&dataTestModel);
+	if (!CFL_InitCharModel(&dataTestModel, mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
+		dataTestModelValid = false;
+		return false;
+	}
+	dataTestModelValid = true;
+	updateDataTestDisplay(mii);
+	return true;
+}
+
 static void startDataTest(void)
 {
-	CFL_DestroyCharModel(&dataTestModel);
+	CFL_DeleteModel(&dataTestModel);
 	dataTestModelValid = false;
 
 	MiiData mii;
@@ -451,14 +507,12 @@ static void startDataTest(void)
 		screen = SCREEN_TITLE;
 		return;
 	}
-	if (!CFL_InitCharModel(&dataTestModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
+	if (!rebuildDataTestModel(&mii)) {
 		dbglogErr("\nCharModel from Data: could not build a CharModel from the decoded Mii.\n");
 		screen = SCREEN_TITLE;
 		return;
 	}
-	dataTestModelValid = true;
 	dataTestSpin = 0.0f;
-	updateDataTestDisplay(&mii);
 
 	cameraDist = 3.2f;
 	yaw = 0.0f; pitch = 0.0f; headX = 0.0f; headY = 0.0f;
@@ -471,7 +525,7 @@ static void drawDataTest(C3D_RenderTarget* target)
 	if (dataTestModelValid)
 		sceneRenderModel(&dataTestModel, 0.0f, 0.0f, dataTestSpin);
 
-	char label[350];
+	char label[400];
 	snprintf(label, sizeof(label), "CharModel from Data   (SELECT: pick a Mii   B: back)\nName: %s   ID: %08lX\n%s",
 		dataTestMiiName, (unsigned long)dataTestMiiId, dataTestBase64Display);
 
@@ -486,7 +540,7 @@ static void drawDataTest(C3D_RenderTarget* target)
 
 static void startIconTest(void)
 {
-	CFL_DestroyCharModel(&iconModel);
+	CFL_DeleteModel(&iconModel);
 	if (iconTexture256Valid) { C3D_TexDelete(&iconTexture256); iconTexture256Valid = false; }
 	if (iconTexture128Valid) { C3D_TexDelete(&iconTexture128); iconTexture128Valid = false; }
 
@@ -500,7 +554,7 @@ static void startIconTest(void)
 	CFLIconSetting transparentSetting = { CFL_ICON_BG_DIRECT, { 0.0f, 0.0f, 0.0f, 0.0f }, NULL, NULL };
 	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, &transparentSetting, &iconTexture256)) {
 		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (256) failed.\n");
-		CFL_DestroyCharModel(&iconModel);
+		CFL_DeleteModel(&iconModel);
 		screen = SCREEN_TITLE;
 		return;
 	}
@@ -509,7 +563,7 @@ static void startIconTest(void)
 		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (128) failed.\n");
 		C3D_TexDelete(&iconTexture256);
 		iconTexture256Valid = false;
-		CFL_DestroyCharModel(&iconModel);
+		CFL_DeleteModel(&iconModel);
 		screen = SCREEN_TITLE;
 		return;
 	}
@@ -610,6 +664,7 @@ int main(void)
 {
 	gfxInitDefault();
 	consoleInit(GFX_BOTTOM, NULL);
+	cfguInit();
 
 	CFL_EnableSDDebug(true);
 	dbglog("CFL Tool\n\n");
@@ -626,6 +681,7 @@ int main(void)
 		C3D_Fini();
 		waitForStartAndExit();
 		CFL_EnableSDDebug(false);
+		cfguExit();
 		gfxExit();
 		return 0;
 	}
@@ -677,7 +733,7 @@ int main(void)
 				int slot = modelCount - 1;
 				MiiData mii;
 				if (selectMii(&mii)) {
-					CFL_DestroyCharModel(&models[slot]);
+					CFL_DeleteModel(&models[slot]);
 					if (CFL_InitCharModel(&models[slot], &mii, activeResolution, activeExpressionFlags)) {
 						CFL_SetExpression(&models[slot], currentExpression);
 					} else {
@@ -724,7 +780,7 @@ int main(void)
 
 		case SCREEN_ICON_TEST:
 			if (kDown & KEY_B) {
-				CFL_DestroyCharModel(&iconModel);
+				CFL_DeleteModel(&iconModel);
 				if (iconTexture256Valid) { C3D_TexDelete(&iconTexture256); iconTexture256Valid = false; }
 				if (iconTexture128Valid) { C3D_TexDelete(&iconTexture128); iconTexture128Valid = false; }
 				screen = SCREEN_TITLE;
@@ -733,7 +789,7 @@ int main(void)
 
 		case SCREEN_DATA_TEST:
 			if (kDown & KEY_B) {
-				CFL_DestroyCharModel(&dataTestModel);
+				CFL_DeleteModel(&dataTestModel);
 				dataTestModelValid = false;
 				screen = SCREEN_TITLE;
 				break;
@@ -741,14 +797,8 @@ int main(void)
 			if (kDown & KEY_SELECT) {
 				MiiData mii;
 				if (selectMii(&mii)) {
-					CFL_DestroyCharModel(&dataTestModel);
-					if (CFL_InitCharModel(&dataTestModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
-						dataTestModelValid = true;
-						updateDataTestDisplay(&mii);
-					} else {
-						dataTestModelValid = false;
+					if (!rebuildDataTestModel(&mii))
 						dbglogErr("\nCharModel from Data: could not build a CharModel from the selected Mii.\n");
-					}
 				}
 			}
 			dataTestSpin += 0.015f;
@@ -785,10 +835,10 @@ int main(void)
 	}
 
 	destroyTestModels();
-	CFL_DestroyCharModel(&iconModel);
+	CFL_DeleteModel(&iconModel);
 	if (iconTexture256Valid) C3D_TexDelete(&iconTexture256);
 	if (iconTexture128Valid) C3D_TexDelete(&iconTexture128);
-	CFL_DestroyCharModel(&dataTestModel);
+	CFL_DeleteModel(&dataTestModel);
 	for (int i = 0; i < ICON_QUAD_SLOTS; i++) {
 		if (s_iconQuadVBO[i]) linearFree(s_iconQuadVBO[i]);
 		if (s_iconQuadIBO[i]) linearFree(s_iconQuadIBO[i]);
@@ -799,6 +849,7 @@ int main(void)
 	C2D_Fini();
 	C3D_Fini();
 	CFL_EnableSDDebug(false);
+	cfguExit();
 	gfxExit();
 	return 0;
 }

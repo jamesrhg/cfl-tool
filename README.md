@@ -1,8 +1,8 @@
 # CFL Tool
 
 A 3DS homebrew app for previewing Mii heads rendered by
-[cfl-mii](https://github.com/) - a reimplementation of Nintendo's own
-CFL Mii-rendering library.
+[cfl-mii](https://github.com/jamesrhg/cfl-mii) - a reimplementation of
+Nintendo's own CFL Mii-rendering library.
 
 ## Features
 
@@ -13,6 +13,11 @@ CFL Mii-rendering library.
   want on screen at once.
 - **Icon Test** - renders a Mii through `CFL_CommandMakeModelIcon` and
   displays the resulting icon texture at two sizes.
+- **CharModel from Data** - decodes a sample `CFLStoreData` (the
+  standard checksummed Mii exchange format) straight into a rendered
+  CharModel, and lets you pick any Mii from the system selector and
+  re-encode it back to base64 `CFLStoreData` - a round-trip demo of
+  `CFL_MakeStoreData`/`CFL_IsStoreDataValid`.
 
 ## Controls
 
@@ -42,4 +47,4 @@ If you already cloned without `--recurse-submodules`:
 git submodule update --init --recursive
 ```
 
-Produces `cfl-tool.3dsx`.
+Produces `cfl-mii-demo.3dsx`.
