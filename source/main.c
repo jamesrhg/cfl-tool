@@ -79,7 +79,7 @@ static bool iconTexture256Valid = false;
 static bool iconTexture128Valid = false;
 
 static const char* kSampleBase64StoreData =
-	"AwBgMIJUICvpzY4vnWYVrXy7ikd01AAAWR1KAGEAcwBtAGkAbgBlAAAAAAAAABw3EhB7ASFuQxwNZMcYAAgegg0AMEGzW4JtAAAAAAAAAAAAAAAAAAAAAAAAAAAAAML0";
+	"AwAEMAIHJxb3L3p/lBioWpzmNejD+wAANV5CMIQwSzAAAAAAAAAAAAAAAAAAAFEmAhBIAQpGZBoAMmUUgRQTZA4AACkAUkhQQjCEMEswAAAAAAAAAAAAAAAAAAAAANfO";
 
 static CFLCharModel dataTestModel;
 static bool dataTestModelValid = false;
@@ -444,11 +444,20 @@ static bool miiCharsetMatchesConsoleRegion(u8 charSet, u8 region)
 	}
 }
 
+static bool getHomeAuthorId(u64* outAuthorId)
+{
+	return R_SUCCEEDED(CFGU_GenHashConsoleUnique(0, outAuthorId));
+}
+
 static void getSafeMiiName16(const MiiData* mii, u16 outName[11])
 {
 	if (mii->mii_options.is_private_name) {
-		outName[0] = u'?'; outName[1] = u'?'; outName[2] = u'?'; outName[3] = 0;
-		return;
+		u64 myAuthorId;
+		bool isMine = getHomeAuthorId(&myAuthorId) && myAuthorId == mii->system_id;
+		if (!isMine) {
+			outName[0] = u'?'; outName[1] = u'?'; outName[2] = u'?'; outName[3] = 0;
+			return;
+		}
 	}
 
 	memcpy(outName, mii->mii_name, sizeof(mii->mii_name));
