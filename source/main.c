@@ -8,6 +8,10 @@
 
 #include "cfl_mii.h"
 
+#include "MaleBody_bin.h"
+#include "FemaleBody_bin.h"
+#include "IconBody_bin.h"
+
 #define CLEAR_COLOR 0x404040FF
 
 #define DISPLAY_TRANSFER_FLAGS \
@@ -24,13 +28,16 @@ static float yaw = 0.0f;
 static float pitch = 0.0f;
 static float headX = 0.0f;
 static float headY = 0.0f;
+
 static float cameraDist = 3.2f;
 
 #define MAX_TEST_MODELS 6
 static CFLCharModel models[MAX_TEST_MODELS];
 static int modelCount = 0;
 static CFLExpression currentExpression = CFL_EXPRESSION_NORMAL;
+
 static CFLExpressionFlag testExpressionFlags = CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL);
+
 static float modelSpin[MAX_TEST_MODELS];
 
 typedef enum {
@@ -39,12 +46,14 @@ typedef enum {
 	SCREEN_CHARMODEL_TEST,
 	SCREEN_ICON_TEST,
 	SCREEN_DATA_TEST,
+	SCREEN_BODY_TEST,
 } AppScreen;
 static AppScreen screen = SCREEN_TITLE;
 
-#define TITLE_OPTION_COUNT 3
+#define TITLE_OPTION_COUNT 4
 static const char* kTitleOptions[TITLE_OPTION_COUNT] = {
 	"CharModel only Test",
+	"CharModel + Body Test",
 	"Icon Test",
 	"CharModel from Data",
 };
@@ -58,6 +67,7 @@ typedef struct {
 } CharModelTestConfig;
 
 static const CharModelTestConfig kCharModelConfigs[] = {
+
 	{ "1 CharModel, 512 Tex, Normal",
 	  1, CFL_RESOLUTION_512, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL) },
 	{ "1 CharModel, 256 Tex, All Exp",
@@ -73,10 +83,25 @@ static const CharModelTestConfig kCharModelConfigs[] = {
 static int submenuSelection = 0;
 
 static CFLCharModel iconModel;
-static C3D_Tex iconTexture256;
-static C3D_Tex iconTexture128;
-static bool iconTexture256Valid = false;
-static bool iconTexture128Valid = false;
+static C3D_Tex iconTexture256NoBody;
+static C3D_Tex iconTexture128NoBody;
+static bool iconTexture256NoBodyValid = false;
+static bool iconTexture128NoBodyValid = false;
+static C3D_Tex iconTexture256Body;
+static C3D_Tex iconTexture128Body;
+static bool iconTexture256BodyValid = false;
+static bool iconTexture128BodyValid = false;
+
+static CFLBodyModel iconBodyModel;
+static bool iconBodyModelValid = false;
+static bool iconShowBody = false;
+
+static CFLCharModel bodyTestModel;
+static bool bodyTestModelValid = false;
+static CFLBodyModel bodyTestBody;
+static bool bodyTestBodyValid = false;
+static bool bodyShown = true;
+static float bodySpin = 0.0f;
 
 static const char* kSampleBase64StoreData =
 	"AwAEMAIHJxb3L3p/lBioWpzmNejD+wAANV5CMIQwSzAAAAAAAAAAAAAAAAAAAFEmAhBIAQpGZBoAMmUUgRQTZA4AACkAUkhQQjCEMEswAAAAAAAAAAAAAAAAAAAAANfO";
@@ -99,6 +124,7 @@ static bool selectMii(MiiData* mii)
 	MiiSelectorReturn ret;
 	miiSelectorInit(&conf);
 	miiSelectorSetTitle(&conf, "Select a Mii for the demo");
+
 	miiSelectorSetOptions(&conf, MIISELECTOR_CANCEL | MIISELECTOR_GUESTS);
 	miiSelectorSetInitialIndex(&conf, s_lastMiiSelectorIndex);
 	conf.show_guest_page = s_lastMiiWasGuest ? 1 : 0;
@@ -229,7 +255,6 @@ static CFLExpression nextTestExpression(CFLExpression from)
 	return from;
 }
 
-
 static void getSlotOffset(int index, int count, float* outX, float* outY)
 {
 	static const float SPACING = 3.3f;
@@ -238,20 +263,20 @@ static void getSlotOffset(int index, int count, float* outX, float* outY)
 	*outY = 0.0f;
 }
 
-static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, float spinYaw)
+static void sceneBuildCameraModelView(C3D_Mtx* out, float slotX, float slotY, float spinYaw)
+{
+	Mtx_Identity(out);
+	Mtx_Translate(out, headX + slotX, headY + slotY, -cameraDist, true);
+	Mtx_RotateX(out, pitch, true);
+	Mtx_RotateY(out, yaw, true);
+	Mtx_RotateY(out, spinYaw, true);
+}
+
+static void sceneDrawCharModelParts(const CFLCharModel* cm, const C3D_Mtx* modelView)
 {
 	CFLShaderLocations loc = CFL_GetShaderLocations();
-
-	C3D_Mtx modelView;
-	Mtx_Identity(&modelView);
-	Mtx_Translate(&modelView, headX + slotX, headY + slotY, -cameraDist, true);
-	Mtx_RotateX(&modelView, pitch, true);
-	Mtx_RotateY(&modelView, yaw, true);
-	Mtx_RotateY(&modelView, spinYaw, true);
-	Mtx_Scale(&modelView, scale, scale, scale);
-
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.projection, &projection);
-	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.modelView,  &modelView);
+	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.modelView,  modelView);
 
 	CFL_BindDefaultShader();
 
@@ -271,6 +296,7 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 	int partCount = CFL_GetPartCount(cm);
 	for (int pass = 0; pass < 2; pass++) {
 		bool texturedPass = (pass == 1);
+
 		C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA);
 
 		for (int i = 0; i < partCount; i++) {
@@ -289,6 +315,7 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 			if (part->hasTexture) {
 				C3D_TexBind(0, (C3D_Tex*)&part->tex);
 				C3D_TexEnvInit(env);
+
 				if (part->isAlphaOnly) {
 					C3D_TexEnvSrc(env, C3D_RGB, GPU_FRAGMENT_PRIMARY_COLOR, 0, 0);
 					C3D_TexEnvFunc(env, C3D_RGB, GPU_REPLACE);
@@ -328,8 +355,78 @@ static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, f
 	}
 }
 
+static void sceneRenderModel(const CFLCharModel* cm, float slotX, float slotY, float spinYaw)
+{
+	C3D_Mtx modelView;
+	sceneBuildCameraModelView(&modelView, slotX, slotY, spinYaw);
+	Mtx_Scale(&modelView, scale, scale, scale);
+	sceneDrawCharModelParts(cm, &modelView);
+}
+
+static void sceneRenderBody(const CFLBodyModel* body, const C3D_Mtx* modelView)
+{
+	CFLShaderLocations loc = CFL_GetShaderLocations();
+	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.projection, &projection);
+	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, loc.modelView, modelView);
+	CFL_BindDefaultShader();
+
+	C3D_TexEnv* env1 = C3D_GetTexEnv(1);
+	C3D_TexEnvInit(env1);
+	C3D_TexEnvSrc(env1, C3D_RGB, GPU_PREVIOUS, GPU_FRAGMENT_SECONDARY_COLOR, 0);
+	C3D_TexEnvFunc(env1, C3D_RGB, GPU_ADD);
+	C3D_TexEnvSrc(env1, C3D_Alpha, GPU_PREVIOUS, 0, 0);
+	C3D_TexEnvFunc(env1, C3D_Alpha, GPU_REPLACE);
+	C3D_DirtyTexEnv(env1);
+	C3D_TexEnv* env2 = C3D_GetTexEnv(2);
+	C3D_TexEnvInit(env2);
+	C3D_DirtyTexEnv(env2);
+
+	C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA);
+
+	for (int i = 0; i < body->partCount; i++) {
+		const CFLBodyPart* part = &body->parts[i];
+		C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_ALL);
+
+		C3D_BufInfo* bufInfo = C3D_GetBufInfo();
+		BufInfo_Init(bufInfo);
+		BufInfo_Add(bufInfo, part->vbo, sizeof(Vertex), 3, 0x210);
+
+		CFL_SetDefaultMaterial(part->color, false);
+
+		C3D_TexEnv* env = C3D_GetTexEnv(0);
+		C3D_TexEnvInit(env);
+		C3D_TexEnvSrc(env, C3D_Both, GPU_FRAGMENT_PRIMARY_COLOR, 0, 0);
+		C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+
+		C3D_DrawElements(GPU_TRIANGLES, part->indexCount, C3D_UNSIGNED_BYTE, part->ibo);
+	}
+}
+
+static void sceneRenderModelWithBody(const CFLCharModel* cm, const CFLBodyModel* body, float slotX, float slotY, float spinYaw)
+{
+	C3D_Mtx cameraView;
+	sceneBuildCameraModelView(&cameraView, slotX, slotY, spinYaw);
+
+	if (body && body->partCount > 0) {
+		C3D_Mtx bodyView = cameraView;
+		Mtx_Scale(&bodyView, scale, scale, scale);
+		sceneRenderBody(body, &bodyView);
+	}
+
+	C3D_Mtx headView = cameraView;
+	if (body && body->hasHeadBone) {
+		const float* m = body->headBoneWorldMatrix;
+		Mtx_Translate(&headView, m[3] * scale, m[7] * scale, m[11] * scale, true);
+		Mtx_Scale(&headView, scale * CFL_HEAD_TO_BODY_SCALE, scale * CFL_HEAD_TO_BODY_SCALE, scale * CFL_HEAD_TO_BODY_SCALE);
+	} else {
+		Mtx_Scale(&headView, scale, scale, scale);
+	}
+	sceneDrawCharModelParts(cm, &headView);
+}
+
 static void sceneRender(void)
 {
+
 	CFL_RebindShader();
 	for (int i = 0; i < modelCount; i++) {
 		if (!CFL_HasCharModel(&models[i])) continue;
@@ -344,6 +441,7 @@ static C2D_TextBuf s_textBuf;
 static void drawExpressionOverlay(C3D_RenderTarget* target)
 {
 	char label[64];
+
 	snprintf(label, sizeof(label), "Expression: %s\n(SELECT: replace last Mii)",
 		CFL_GetExpressionName(currentExpression));
 
@@ -406,6 +504,7 @@ static void startCharModelTest(const CharModelTestConfig* cfg)
 		MiiData mii;
 		selectMii(&mii);
 		dbglogVramStats("startCharModelTest before CFL_InitCharModel", false);
+
 		modelCount = i + 1;
 		if (!CFL_InitCharModel(&models[i], &mii, cfg->resolution, cfg->expressionFlags)) {
 			dbglogErr("\nCould not build CharModel %d/%d for this test.\n", i + 1, cfg->modelCount);
@@ -458,6 +557,7 @@ static void getSafeMiiName16(const MiiData* mii, u16 outName[11])
 			outName[0] = u'?'; outName[1] = u'?'; outName[2] = u'?'; outName[3] = 0;
 			return;
 		}
+
 	}
 
 	memcpy(outName, mii->mii_name, sizeof(mii->mii_name));
@@ -494,6 +594,7 @@ static void utf16ToUtf8(const u16* utf16, int maxChars, char* out, size_t outCap
 
 static void updateDataTestDisplay(const MiiData* mii)
 {
+
 	u16 nameBuf[11];
 	getSafeMiiName16(mii, nameBuf);
 	utf16ToUtf8(nameBuf, 10, dataTestMiiName, sizeof(dataTestMiiName));
@@ -563,11 +664,40 @@ static void drawDataTest(C3D_RenderTarget* target)
 	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.45f, 0.45f, C2D_Color32(255, 255, 255, 255));
 }
 
+static bool renderIconPair(bool withBody, C3D_Tex* out256, bool* out256Valid, C3D_Tex* out128, bool* out128Valid)
+{
+	*out256Valid = false;
+	*out128Valid = false;
+
+	CFL_AttachBody(&iconModel, (withBody && iconBodyModelValid) ? &iconBodyModel : NULL);
+
+	CFLIconSetting transparentSetting = { CFL_ICON_BG_DIRECT, { 0.0f, 0.0f, 0.0f, 0.0f }, NULL, NULL };
+	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, &transparentSetting, out256)) {
+		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (256, withBody=%d) failed.\n", withBody);
+		CFL_AttachBody(&iconModel, NULL);
+		return false;
+	}
+	*out256Valid = true;
+	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 128, NULL, out128)) {
+		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (128, withBody=%d) failed.\n", withBody);
+		CFL_AttachBody(&iconModel, NULL);
+		return false;
+	}
+	*out128Valid = true;
+	CFL_AttachBody(&iconModel, NULL);
+	return true;
+}
+
 static void startIconTest(void)
 {
 	CFL_DeleteModel(&iconModel);
-	if (iconTexture256Valid) { C3D_TexDelete(&iconTexture256); iconTexture256Valid = false; }
-	if (iconTexture128Valid) { C3D_TexDelete(&iconTexture128); iconTexture128Valid = false; }
+
+	if (iconTexture256NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture256NoBody); iconTexture256NoBodyValid = false; }
+	if (iconTexture128NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture128NoBody); iconTexture128NoBodyValid = false; }
+	if (iconTexture256BodyValid) { CFL_ReleaseIconTarget(&iconTexture256Body); iconTexture256BodyValid = false; }
+	if (iconTexture128BodyValid) { CFL_ReleaseIconTarget(&iconTexture128Body); iconTexture128BodyValid = false; }
+	if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
+	iconShowBody = false;
 
 	MiiData mii;
 	selectMii(&mii);
@@ -576,23 +706,25 @@ static void startIconTest(void)
 		screen = SCREEN_TITLE;
 		return;
 	}
-	CFLIconSetting transparentSetting = { CFL_ICON_BG_DIRECT, { 0.0f, 0.0f, 0.0f, 0.0f }, NULL, NULL };
-	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 256, &transparentSetting, &iconTexture256)) {
-		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (256) failed.\n");
+
+	if (!CFL_LoadBodyModel(IconBody_bin, IconBody_bin_size, &mii, &iconBodyModel)) {
+		dbglogErr("\nIcon Test: could not load a body model for this Mii (body toggle unavailable).\n");
+		iconBodyModelValid = false;
+	} else {
+		iconBodyModelValid = true;
+	}
+
+	if (!renderIconPair(false, &iconTexture256NoBody, &iconTexture256NoBodyValid, &iconTexture128NoBody, &iconTexture128NoBodyValid)) {
 		CFL_DeleteModel(&iconModel);
+		if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
 		screen = SCREEN_TITLE;
 		return;
 	}
-	iconTexture256Valid = true;
-	if (!CFL_CommandMakeModelIcon(&iconModel, CFL_EXPRESSION_NORMAL, 128, NULL, &iconTexture128)) {
-		dbglogErr("\nIcon Test: CFL_CommandMakeModelIcon (128) failed.\n");
-		C3D_TexDelete(&iconTexture256);
-		iconTexture256Valid = false;
-		CFL_DeleteModel(&iconModel);
-		screen = SCREEN_TITLE;
-		return;
+	if (iconBodyModelValid) {
+		if (!renderIconPair(true, &iconTexture256Body, &iconTexture256BodyValid, &iconTexture128Body, &iconTexture128BodyValid)) {
+			dbglogErr("\nIcon Test: body-enabled icon pair failed to render - X toggle unavailable this session.\n");
+		}
 	}
-	iconTexture128Valid = true;
 	screen = SCREEN_ICON_TEST;
 }
 
@@ -657,20 +789,94 @@ static void drawIconTest(C3D_RenderTarget* target)
 	C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_ALL);
 	C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA);
 
+	bool bodyPairReady = iconTexture256BodyValid && iconTexture128BodyValid;
+	bool showingBody = iconShowBody && bodyPairReady;
+	C3D_Tex* tex256 = showingBody ? &iconTexture256Body : &iconTexture256NoBody;
+	C3D_Tex* tex128 = showingBody ? &iconTexture128Body : &iconTexture128NoBody;
+	bool tex256Valid = showingBody ? iconTexture256BodyValid : iconTexture256NoBodyValid;
+	bool tex128Valid = showingBody ? iconTexture128BodyValid : iconTexture128NoBodyValid;
+
 	static const float kBottomY = -0.9f;
 	float half256 = 0.7f, half128 = 0.35f;
-	if (iconTexture256Valid)
-		drawIconQuad(0, &iconTexture256, -0.75f, kBottomY + half256, half256);
-	if (iconTexture128Valid)
-		drawIconQuad(1, &iconTexture128, 0.65f, kBottomY + half128, half128);
+	if (tex256Valid)
+		drawIconQuad(0, tex256, -0.75f, kBottomY + half256, half256);
+	if (tex128Valid)
+		drawIconQuad(1, tex128, 0.65f, kBottomY + half128, half128);
+
+	char label[160];
+	if (bodyPairReady) {
+		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px   (X: body %s   B: back)",
+			iconShowBody ? "ON" : "OFF");
+	} else {
+		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px - body failed to load   (B: back)");
+	}
 
 	C2D_Prepare();
 	C2D_SceneBegin(target);
 	C2D_TextBufClear(s_textBuf);
 	C2D_Text text;
-	C2D_TextParse(&text, s_textBuf, "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px   (B: back)");
+	C2D_TextParse(&text, s_textBuf, label);
 	C2D_TextOptimize(&text);
-	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.6f, 0.6f, C2D_Color32(255, 255, 255, 255));
+	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.5f, 0.5f, C2D_Color32(255, 255, 255, 255));
+}
+
+static void startBodyTest(void)
+{
+	CFL_DeleteModel(&bodyTestModel);
+	bodyTestModelValid = false;
+	if (bodyTestBodyValid) { CFL_DeleteBodyModel(&bodyTestBody); bodyTestBodyValid = false; }
+
+	MiiData mii;
+	selectMii(&mii);
+	if (!CFL_InitCharModel(&bodyTestModel, &mii, CFL_RESOLUTION_256, CFL_EXPRESSION_FLAG(CFL_EXPRESSION_NORMAL))) {
+		dbglogErr("\nBody Test: could not build a CharModel from this Mii.\n");
+		screen = SCREEN_TITLE;
+		return;
+	}
+	bodyTestModelValid = true;
+
+	const u8* bodyData = mii.mii_details.sex ? FemaleBody_bin : MaleBody_bin;
+	u32 bodySize = mii.mii_details.sex ? FemaleBody_bin_size : MaleBody_bin_size;
+	if (!CFL_LoadBodyModel(bodyData, bodySize, &mii, &bodyTestBody)) {
+		dbglogErr("\nBody Test: could not load a body model for this Mii (showing head only).\n");
+		bodyTestBodyValid = false;
+	} else {
+		bodyTestBodyValid = true;
+	}
+
+	bodyShown = true;
+	bodySpin = 0.0f;
+
+	cameraDist = 20.0f;
+	yaw = 0.0f;
+	pitch = 0.0f;
+	headX = 0.0f;
+	headY = 0.5f;
+	screen = SCREEN_BODY_TEST;
+}
+
+static void drawBodyTest(C3D_RenderTarget* target)
+{
+	CFL_RebindShader();
+	if (bodyTestModelValid) {
+		sceneRenderModelWithBody(&bodyTestModel, (bodyShown && bodyTestBodyValid) ? &bodyTestBody : NULL, 0.0f, 0.0f, bodySpin);
+	}
+
+	char label[160];
+	if (bodyTestBodyValid) {
+		snprintf(label, sizeof(label), "CharModel + Body Test   (SELECT: pick a Mii   X: body %s   B: back)",
+			bodyShown ? "ON" : "OFF");
+	} else {
+		snprintf(label, sizeof(label), "CharModel + Body Test - body failed to load, head only   (SELECT: pick a Mii   B: back)");
+	}
+
+	C2D_Prepare();
+	C2D_SceneBegin(target);
+	C2D_TextBufClear(s_textBuf);
+	C2D_Text text;
+	C2D_TextParse(&text, s_textBuf, label);
+	C2D_TextOptimize(&text);
+	C2D_DrawText(&text, C2D_WithColor, 10.0f, 10.0f, 0.0f, 0.5f, 0.5f, C2D_Color32(255, 255, 255, 255));
 }
 
 static void waitForStartAndExit(void)
@@ -689,11 +895,8 @@ int main(void)
 {
 	gfxInitDefault();
 	consoleInit(GFX_BOTTOM, NULL);
-	cfguInit();
 
-	CFL_EnableSDDebug(true);
-	dbglog("CFL Tool\n\n");
-	dbglog("Log file: sdmc:/3ds/cfl_test.txt\n\n");
+	cfguInit();
 
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
 	C3D_RenderTarget* target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
@@ -711,7 +914,6 @@ int main(void)
 		return 0;
 	}
 	Mtx_PerspTilt(&projection, C3D_AngleFromDegrees(50.0f), C3D_AspectRatioTop, 0.01f, 1000.0f, false);
-
 
 	C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
 	s_textBuf = C2D_TextBufNew(256);
@@ -734,6 +936,8 @@ int main(void)
 					submenuSelection = 0;
 					screen = SCREEN_CHARMODEL_SUBMENU;
 				} else if (titleSelection == 1) {
+					startBodyTest();
+				} else if (titleSelection == 2) {
 					startIconTest();
 				} else {
 					startDataTest();
@@ -754,6 +958,7 @@ int main(void)
 				screen = SCREEN_TITLE;
 				break;
 			}
+
 			if ((kDown & KEY_SELECT) && modelCount > 0) {
 				int slot = modelCount - 1;
 				MiiData mii;
@@ -761,11 +966,13 @@ int main(void)
 					CFL_DeleteModel(&models[slot]);
 					if (CFL_InitCharModel(&models[slot], &mii, activeResolution, activeExpressionFlags)) {
 						CFL_SetExpression(&models[slot], currentExpression);
+
 					} else {
 						dbglogErr("\nCould not rebuild CharModel %d after reselect.\n", slot);
 					}
 				}
 			}
+
 			if (kDown & KEY_X) {
 				currentExpression = nextTestExpression(currentExpression);
 				for (int i = 0; i < modelCount; i++) {
@@ -806,10 +1013,61 @@ int main(void)
 		case SCREEN_ICON_TEST:
 			if (kDown & KEY_B) {
 				CFL_DeleteModel(&iconModel);
-				if (iconTexture256Valid) { C3D_TexDelete(&iconTexture256); iconTexture256Valid = false; }
-				if (iconTexture128Valid) { C3D_TexDelete(&iconTexture128); iconTexture128Valid = false; }
+				if (iconTexture256NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture256NoBody); iconTexture256NoBodyValid = false; }
+				if (iconTexture128NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture128NoBody); iconTexture128NoBodyValid = false; }
+				if (iconTexture256BodyValid) { CFL_ReleaseIconTarget(&iconTexture256Body); iconTexture256BodyValid = false; }
+				if (iconTexture128BodyValid) { CFL_ReleaseIconTarget(&iconTexture128Body); iconTexture128BodyValid = false; }
+				if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
 				screen = SCREEN_TITLE;
+				break;
 			}
+
+			if ((kDown & KEY_X) && iconTexture256BodyValid && iconTexture128BodyValid) {
+				iconShowBody = !iconShowBody;
+				dbglog("Icon Test: X pressed, iconShowBody now %d (pre-rendered, no re-render)\n", iconShowBody);
+			}
+			break;
+
+		case SCREEN_BODY_TEST:
+			if (kDown & KEY_B) {
+				CFL_DeleteModel(&bodyTestModel);
+				bodyTestModelValid = false;
+				if (bodyTestBodyValid) { CFL_DeleteBodyModel(&bodyTestBody); bodyTestBodyValid = false; }
+				screen = SCREEN_TITLE;
+				break;
+			}
+			if (kDown & KEY_SELECT) {
+				startBodyTest();
+				break;
+			}
+			if (kDown & KEY_X) bodyShown = !bodyShown;
+
+			if (hidKeysHeld() & KEY_L) cameraDist *= 1.02f;
+			if (hidKeysHeld() & KEY_R) cameraDist *= 0.98f;
+			if (cameraDist < 0.3f) cameraDist = 0.3f;
+			if (cameraDist > 40.0f) cameraDist = 40.0f;
+
+			if (hidKeysHeld() & KEY_DLEFT)  headX -= 0.08f;
+			if (hidKeysHeld() & KEY_DRIGHT) headX += 0.08f;
+			if (hidKeysHeld() & KEY_DUP)    headY += 0.08f;
+			if (hidKeysHeld() & KEY_DDOWN)  headY -= 0.08f;
+
+			{
+				circlePosition cpos;
+				hidCircleRead(&cpos);
+				float cx = cpos.dx / 156.0f;
+				float cy = cpos.dy / 156.0f;
+				if (fabsf(cx) < 0.15f) cx = 0.0f;
+				if (fabsf(cy) < 0.15f) cy = 0.0f;
+				if (cx != 0.0f || cy != 0.0f) {
+					yaw += cx * 0.05f;
+					pitch += cy * 0.05f;
+					if (pitch > 1.3f) pitch = 1.3f;
+					if (pitch < -1.3f) pitch = -1.3f;
+				}
+			}
+
+			bodySpin += 0.015f;
 			break;
 
 		case SCREEN_DATA_TEST:
@@ -819,6 +1077,7 @@ int main(void)
 				screen = SCREEN_TITLE;
 				break;
 			}
+
 			if (kDown & KEY_SELECT) {
 				MiiData mii;
 				if (selectMii(&mii)) {
@@ -878,6 +1137,9 @@ int main(void)
 			case SCREEN_ICON_TEST:
 				drawIconTest(target);
 				break;
+			case SCREEN_BODY_TEST:
+				drawBodyTest(target);
+				break;
 			case SCREEN_DATA_TEST:
 				drawDataTest(target);
 				break;
@@ -887,8 +1149,13 @@ int main(void)
 
 	destroyTestModels();
 	CFL_DeleteModel(&iconModel);
-	if (iconTexture256Valid) C3D_TexDelete(&iconTexture256);
-	if (iconTexture128Valid) C3D_TexDelete(&iconTexture128);
+	if (iconTexture256NoBodyValid) CFL_ReleaseIconTarget(&iconTexture256NoBody);
+	if (iconTexture128NoBodyValid) CFL_ReleaseIconTarget(&iconTexture128NoBody);
+	if (iconTexture256BodyValid) CFL_ReleaseIconTarget(&iconTexture256Body);
+	if (iconTexture128BodyValid) CFL_ReleaseIconTarget(&iconTexture128Body);
+	if (iconBodyModelValid) CFL_DeleteBodyModel(&iconBodyModel);
+	CFL_DeleteModel(&bodyTestModel);
+	if (bodyTestBodyValid) CFL_DeleteBodyModel(&bodyTestBody);
 	CFL_DeleteModel(&dataTestModel);
 	for (int i = 0; i < ICON_QUAD_SLOTS; i++) {
 		if (s_iconQuadVBO[i]) linearFree(s_iconQuadVBO[i]);
@@ -904,4 +1171,3 @@ int main(void)
 	gfxExit();
 	return 0;
 }
-
