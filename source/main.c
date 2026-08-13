@@ -8,9 +8,9 @@
 
 #include "cfl_mii.h"
 
-#include "MaleBody_bin.h"
-#include "FemaleBody_bin.h"
-#include "IconBody_bin.h"
+#include "MaleBody_iqm.h"
+#include "FemaleBody_iqm.h"
+#include "IconBody_iqm.h"
 
 #define CLEAR_COLOR 0x404040FF
 
@@ -91,6 +91,14 @@ static C3D_Tex iconTexture256Body;
 static C3D_Tex iconTexture128Body;
 static bool iconTexture256BodyValid = false;
 static bool iconTexture128BodyValid = false;
+
+static void releaseIconTextures(void)
+{
+	if (iconTexture256NoBodyValid) { C3D_TexDelete(&iconTexture256NoBody); iconTexture256NoBodyValid = false; }
+	if (iconTexture128NoBodyValid) { C3D_TexDelete(&iconTexture128NoBody); iconTexture128NoBodyValid = false; }
+	if (iconTexture256BodyValid) { C3D_TexDelete(&iconTexture256Body); iconTexture256BodyValid = false; }
+	if (iconTexture128BodyValid) { C3D_TexDelete(&iconTexture128Body); iconTexture128BodyValid = false; }
+}
 
 static CFLBodyModel iconBodyModel;
 static bool iconBodyModelValid = false;
@@ -692,10 +700,7 @@ static void startIconTest(void)
 {
 	CFL_DeleteModel(&iconModel);
 
-	if (iconTexture256NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture256NoBody); iconTexture256NoBodyValid = false; }
-	if (iconTexture128NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture128NoBody); iconTexture128NoBodyValid = false; }
-	if (iconTexture256BodyValid) { CFL_ReleaseIconTarget(&iconTexture256Body); iconTexture256BodyValid = false; }
-	if (iconTexture128BodyValid) { CFL_ReleaseIconTarget(&iconTexture128Body); iconTexture128BodyValid = false; }
+	releaseIconTextures();
 	if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
 	iconShowBody = false;
 
@@ -707,7 +712,7 @@ static void startIconTest(void)
 		return;
 	}
 
-	if (!CFL_LoadBodyModel(IconBody_bin, IconBody_bin_size, &mii, &iconBodyModel)) {
+	if (!CFL_LoadBodyModel(IconBody_iqm, IconBody_iqm_size, &mii, &iconBodyModel)) {
 		dbglogErr("\nIcon Test: could not load a body model for this Mii (body toggle unavailable).\n");
 		iconBodyModelValid = false;
 	} else {
@@ -716,6 +721,7 @@ static void startIconTest(void)
 
 	if (!renderIconPair(false, &iconTexture256NoBody, &iconTexture256NoBodyValid, &iconTexture128NoBody, &iconTexture128NoBodyValid)) {
 		CFL_DeleteModel(&iconModel);
+		releaseIconTextures();
 		if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
 		screen = SCREEN_TITLE;
 		return;
@@ -805,10 +811,10 @@ static void drawIconTest(C3D_RenderTarget* target)
 
 	char label[160];
 	if (bodyPairReady) {
-		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px   (X: body %s   B: back)",
+		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px\n(X: body %s   B: back)",
 			iconShowBody ? "ON" : "OFF");
 	} else {
-		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px - body failed to load   (B: back)");
+		snprintf(label, sizeof(label), "Icon Test - CFL_CommandMakeModelIcon() 256px + 128px\n(body failed to load - B: back)");
 	}
 
 	C2D_Prepare();
@@ -835,8 +841,8 @@ static void startBodyTest(void)
 	}
 	bodyTestModelValid = true;
 
-	const u8* bodyData = mii.mii_details.sex ? FemaleBody_bin : MaleBody_bin;
-	u32 bodySize = mii.mii_details.sex ? FemaleBody_bin_size : MaleBody_bin_size;
+	const u8* bodyData = mii.mii_details.sex ? FemaleBody_iqm : MaleBody_iqm;
+	u32 bodySize = mii.mii_details.sex ? FemaleBody_iqm_size : MaleBody_iqm_size;
 	if (!CFL_LoadBodyModel(bodyData, bodySize, &mii, &bodyTestBody)) {
 		dbglogErr("\nBody Test: could not load a body model for this Mii (showing head only).\n");
 		bodyTestBodyValid = false;
@@ -1013,10 +1019,7 @@ int main(void)
 		case SCREEN_ICON_TEST:
 			if (kDown & KEY_B) {
 				CFL_DeleteModel(&iconModel);
-				if (iconTexture256NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture256NoBody); iconTexture256NoBodyValid = false; }
-				if (iconTexture128NoBodyValid) { CFL_ReleaseIconTarget(&iconTexture128NoBody); iconTexture128NoBodyValid = false; }
-				if (iconTexture256BodyValid) { CFL_ReleaseIconTarget(&iconTexture256Body); iconTexture256BodyValid = false; }
-				if (iconTexture128BodyValid) { CFL_ReleaseIconTarget(&iconTexture128Body); iconTexture128BodyValid = false; }
+				releaseIconTextures();
 				if (iconBodyModelValid) { CFL_DeleteBodyModel(&iconBodyModel); iconBodyModelValid = false; }
 				screen = SCREEN_TITLE;
 				break;
@@ -1149,10 +1152,7 @@ int main(void)
 
 	destroyTestModels();
 	CFL_DeleteModel(&iconModel);
-	if (iconTexture256NoBodyValid) CFL_ReleaseIconTarget(&iconTexture256NoBody);
-	if (iconTexture128NoBodyValid) CFL_ReleaseIconTarget(&iconTexture128NoBody);
-	if (iconTexture256BodyValid) CFL_ReleaseIconTarget(&iconTexture256Body);
-	if (iconTexture128BodyValid) CFL_ReleaseIconTarget(&iconTexture128Body);
+	releaseIconTextures();
 	if (iconBodyModelValid) CFL_DeleteBodyModel(&iconBodyModel);
 	CFL_DeleteModel(&bodyTestModel);
 	if (bodyTestBodyValid) CFL_DeleteBodyModel(&bodyTestBody);

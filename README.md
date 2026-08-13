@@ -73,11 +73,16 @@ Produces `cfl-tool.3dsx`.
 
 ## Body models
 
-`data/MaleBody.bin`/`FemaleBody.bin`/`IconBody.bin` are this project's
-own small, custom "CFLB" format (not a standard Nintendo format - see
-[cfl-mii's own README](https://github.com/jamesrhg/cfl-mii#body-models-optional)
-for what that format actually holds), offline-extracted once from real
-Nintendo body assets and embedded into the `.3dsx` the same way the
-vertex shader is, via devkitPro's own `bin2s` mechanism (see the
-`DATA` directory in the `Makefile`) - no extra runtime asset loading
-or network access involved.
+`data/MaleBody.iqm`/`FemaleBody.iqm`/`IconBody.iqm` are real, standard
+[IQM (Inter-Quake Model)](http://sauerbraten.org/iqm/) files - the same
+open format Blender's own importer/exporter and several other engines
+support, not a project-specific format - extracted once, offline, from
+real Nintendo body assets, and embedded into the `.3dsx` the same way
+the vertex shader is, via devkitPro's own `bin2s` mechanism (see the
+`DATA` directory in the `Makefile`) - no extra runtime asset loading or
+network access involved. See
+[cfl-mii's own README](https://github.com/jamesrhg/cfl-mii#the-iqm-format-in-detail)
+for exactly what this format holds, how `CFL_LoadBodyModel` reads it,
+and how it makes real skeletal animation playback possible in the
+future (not implemented yet - these three assets are static bind-pose
+figures, this app doesn't animate them).
