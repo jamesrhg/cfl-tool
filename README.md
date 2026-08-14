@@ -82,7 +82,10 @@ the vertex shader is, via devkitPro's own `bin2s` mechanism (see the
 `DATA` directory in the `Makefile`) - no extra runtime asset loading or
 network access involved. See
 [cfl-mii's own README](https://github.com/jamesrhg/cfl-mii#the-iqm-format-in-detail)
-for exactly what this format holds, how `CFL_LoadBodyModel` reads it,
-and how it makes real skeletal animation playback possible in the
-future (not implemented yet - these three assets are static bind-pose
-figures, this app doesn't animate them).
+for exactly what this format holds and how `CFL_LoadBodyModel` reads
+it. cfl-mii itself now supports real skeletal animation playback for a
+loaded body model (`CFL_PoseBodyModel`, with a full worked
+[example](https://github.com/jamesrhg/cfl-mii#animating-a-body-model)
+showing a real anim-only `.iqm` reader and per-frame sampling) - this
+app doesn't use it yet, so Body Test still shows these three assets in
+their static bind pose only.
